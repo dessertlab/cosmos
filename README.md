@@ -43,7 +43,7 @@ sudo apt install qemu linux-source-5.19.0
 Finally, clone the repo on your local machine. We will need some files later: 
 
 ```
-git clone https://dessert.unina.it:8088/ldesi/cosmos.git
+git clone https://github.com/dessertlab/Cosmos.git
 ```
 
 ### Kernel compiling and installation
