@@ -1,0 +1,471 @@
+--- nested.c	2023-07-10 18:24:01.000000000 +0000
++++ nested_cosmos.c	2024-10-16 10:44:16.348825793 +0000
+@@ -17,12 +17,52 @@
+ #include "vmx.h"
+ #include "x86.h"
+ 
+-static bool __read_mostly enable_shadow_vmcs = 1;
++#include "vmx/cosmos/cosmos_lib.h"
++
++static bool __read_mostly enable_shadow_vmcs = 0;
+ module_param_named(enable_shadow_vmcs, enable_shadow_vmcs, bool, S_IRUGO);
+ 
+ static bool __read_mostly nested_early_check = 0;
+ module_param(nested_early_check, bool, S_IRUGO);
+ 
++#ifdef _COSMOS_REC_
++	/* RECORDING */
++	extern vmexit* buffer; 
++	extern size_t exit_counter; 
++	extern size_t buffer_size;
++	extern uint8_t enable_tracing; 
++	extern size_t from_vmexit; 
++	extern size_t this_exit_rec;
++	extern uint8_t is_L1; 
++	extern struct semaphore SEM_DUMP_WAIT_rec; 
++
++	extern ktime_t rec_start, rec_end;
++	extern ktime_t* rec_cum_time; // Cumulative time buffer
++	static ktime_t rec_init; 
++	extern uint8_t efficiency_rec; 
++#endif
++
++/* COSMOF-Fi parameters */
++#ifdef _COSMOS_FJ_
++    extern struct semaphore SEM_DUMP_WAIT_fi; 
++    extern uint8_t enable_dump_vmcs12_fi; 
++    extern uint8_t control_execution; 
++    extern vmexit* vmexit_to_inject; 
++	uint8_t dump_vmcs_disp = 0;
++#endif
++
++#ifdef _COSMOS_UT_
++	enum GuestError {
++		Success,
++		GuestInvalidState, // nested_vmx_check_guest_state
++		GuestInvalidControls, // nested_vmx_check_controls
++		GuestInvalidAddressSpaceSize, // nested_vmx_check_address_space_size
++		GuestInvalidHostState, // nested_vmx_check_host_state
++		GuestInvalidExecutionControls // nested_check_vm_execution_controls
++	};
++	static struct kvm_vcpu *current_vcpu; 
++#endif
++
+ #define CC KVM_NESTED_VMENTER_CONSISTENCY_CHECK
+ 
+ /*
+@@ -3526,6 +3566,203 @@
+ 	return NVMX_VMENTRY_VMEXIT;
+ }
+ 
++#ifdef _COSMOS_UT_
++	int nested_vmx_check_guestError (vmexit* exit) {
++		enum GuestError guestErrorTest;
++		enum vm_entry_failure_code ignored;
++		short offset;
++		struct vmcs12 *vmcs12_test;
++		size_t i = 0; 
++
++		/* "Try" to replay only VMCS */
++
++		if (current_vcpu == NULL){
++#ifdef _COSMOS_DBG_
++			printk("[COSMOS UT] current_vcpu NULL");
++#endif
++			return 0; 
++		}
++
++		vmcs12_test = kvmalloc(sizeof(struct vmcs12), GFP_KERNEL);
++		if (!vmcs12_test) {
++			printk("[COSMOS UT] cannot allocate memory for vmcs12_test.\n");
++			return 0; 
++		}
++		*vmcs12_test = *(get_vmcs12(current_vcpu));
++		
++		for (i = 0; i < exit->op_counter; i++) {
++			if (exit->ops[i].type) {
++				offset = get_vmcs12_field_offset(exit->ops[i].field);
++				vmcs12_write_any(vmcs12_test, exit->ops[i].field, offset, exit->ops[i].value);
++			}
++		}
++
++		/* Requisites checking */
++		
++		if (nested_vmx_check_guest_state(current_vcpu, vmcs12_test, &ignored)) {
++			guestErrorTest = GuestInvalidState;
++
++#ifdef _COSMOS_DBG_
++			printk("[COSMOS UT] Guest state error: %d.\n", ignored);
++#endif
++			goto out; 
++		} 
++		if (nested_vmx_check_host_state(current_vcpu, vmcs12_test)) {
++			guestErrorTest = GuestInvalidHostState;
++			goto out; 
++		}
++		if (nested_vmx_check_controls(current_vcpu, vmcs12_test)) {
++			guestErrorTest = GuestInvalidControls;
++			goto out; 
++		}
++		if (nested_vmx_check_address_space_size(current_vcpu, vmcs12_test)) {
++			guestErrorTest = GuestInvalidAddressSpaceSize;
++			goto out; 
++		}
++		if (nested_check_vm_execution_controls(current_vcpu, vmcs12_test)) {
++			guestErrorTest = GuestInvalidExecutionControls;
++			goto out; 
++		}
++		guestErrorTest = Success; 
++
++	out: 
++		kfree (vmcs12_test);
++		return guestErrorTest;
++	}
++	EXPORT_SYMBOL(nested_vmx_check_guestError);
++
++	int nested_vmx_dump_vmcs12(dump_vmcs12_t* d_vmcs12) {
++
++		struct vmcs12 *vmcs12_test;
++
++		if (current_vcpu == NULL){
++#ifdef _COSMOS_DBG_
++			printk("[COSMOS UT] current_vcpu NULL");
++#endif
++			return 0; 
++		}
++
++		if (get_vmcs12(current_vcpu) == NULL) {
++			//printk("[COSMOS UT] DUMP VMCS - VMCS12 NULL\n");
++			return 0; 
++		}
++
++		if (dump_vmcs_disp == 0) return 0; 
++
++		vmcs12_test = get_vmcs12(current_vcpu);
++
++		d_vmcs12->cr0_guest_host_mask = vmcs12_test->cr0_guest_host_mask;
++		d_vmcs12->cr4_guest_host_mask = vmcs12_test->cr4_guest_host_mask;
++		d_vmcs12->cr0_read_shadow = vmcs12_test->cr0_read_shadow;
++		d_vmcs12->cr4_read_shadow = vmcs12_test->cr4_read_shadow;
++		d_vmcs12->vm_exit_reason = vmcs12_test->vm_exit_reason;
++		d_vmcs12->guest_linear_address = vmcs12_test->guest_linear_address;
++		d_vmcs12->guest_cr0 = vmcs12_test->guest_cr0;
++		d_vmcs12->guest_cr3 = vmcs12_test->guest_cr3;
++		d_vmcs12->guest_cr4 = vmcs12_test->guest_cr4;
++		d_vmcs12->guest_es_base = vmcs12_test->guest_es_base;
++		d_vmcs12->guest_cs_base = vmcs12_test->guest_cs_base;
++		d_vmcs12->guest_ss_base = vmcs12_test->guest_ss_base;
++		d_vmcs12->guest_ds_base = vmcs12_test->guest_ds_base;
++		d_vmcs12->guest_fs_base = vmcs12_test->guest_fs_base;
++		d_vmcs12->guest_gs_base = vmcs12_test->guest_gs_base;
++		d_vmcs12->guest_ldtr_base = vmcs12_test->guest_ldtr_base;
++		d_vmcs12->guest_tr_base = vmcs12_test->guest_tr_base;
++		d_vmcs12->guest_gdtr_base = vmcs12_test->guest_gdtr_base;
++		d_vmcs12->guest_idtr_base = vmcs12_test->guest_idtr_base;
++		d_vmcs12->guest_dr7 = vmcs12_test->guest_dr7;
++		d_vmcs12->guest_rsp = vmcs12_test->guest_rsp;
++		d_vmcs12->guest_rip = vmcs12_test->guest_rip;
++		d_vmcs12->guest_rflags = vmcs12_test->guest_rflags;
++		d_vmcs12->guest_pending_dbg_exceptions = vmcs12_test->guest_pending_dbg_exceptions;
++		d_vmcs12->guest_sysenter_esp = vmcs12_test->guest_sysenter_esp;
++		d_vmcs12->guest_sysenter_eip = vmcs12_test->guest_sysenter_eip;
++		d_vmcs12->host_cr0 = vmcs12_test->host_cr0;
++		d_vmcs12->host_cr3 = vmcs12_test->host_cr3;
++		d_vmcs12->host_cr4 = vmcs12_test->host_cr4;
++		d_vmcs12->host_fs_base = vmcs12_test->host_fs_base;
++		d_vmcs12->host_gs_base = vmcs12_test->host_gs_base;
++		d_vmcs12->host_tr_base = vmcs12_test->host_tr_base;
++		d_vmcs12->host_gdtr_base = vmcs12_test->host_gdtr_base;
++		d_vmcs12->host_idtr_base = vmcs12_test->host_idtr_base;
++		d_vmcs12->host_ia32_sysenter_esp = vmcs12_test->host_ia32_sysenter_esp;
++		d_vmcs12->host_ia32_sysenter_eip = vmcs12_test->host_ia32_sysenter_eip;
++		d_vmcs12->host_rsp = vmcs12_test->host_rsp;
++		d_vmcs12->host_rip = vmcs12_test->host_rip;
++		d_vmcs12->exit_qualification = vmcs12_test->exit_qualification;
++		d_vmcs12->pin_based_vm_exec_control = vmcs12_test->pin_based_vm_exec_control;
++		d_vmcs12->cpu_based_vm_exec_control = vmcs12_test->cpu_based_vm_exec_control;
++		d_vmcs12->exception_bitmap = vmcs12_test->exception_bitmap;
++		d_vmcs12->page_fault_error_code_mask = vmcs12_test->page_fault_error_code_mask;
++		d_vmcs12->page_fault_error_code_match = vmcs12_test->page_fault_error_code_match;
++		d_vmcs12->cr3_target_count = vmcs12_test->cr3_target_count;
++		d_vmcs12->vm_exit_controls = vmcs12_test->vm_exit_controls;
++		d_vmcs12->vm_exit_msr_store_count = vmcs12_test->vm_exit_msr_store_count;
++		d_vmcs12->vm_exit_msr_load_count = vmcs12_test->vm_exit_msr_load_count;
++		d_vmcs12->vm_entry_controls = vmcs12_test->vm_entry_controls;
++		d_vmcs12->vm_entry_msr_load_count = vmcs12_test->vm_entry_msr_load_count;
++		d_vmcs12->vm_entry_intr_info_field = vmcs12_test->vm_entry_intr_info_field;
++		d_vmcs12->vm_entry_exception_error_code = vmcs12_test->vm_entry_exception_error_code;
++		d_vmcs12->vm_entry_instruction_len = vmcs12_test->vm_entry_instruction_len;
++		d_vmcs12->tpr_threshold = vmcs12_test->tpr_threshold;
++		d_vmcs12->secondary_vm_exec_control = vmcs12_test->secondary_vm_exec_control;
++		d_vmcs12->vm_instruction_error = vmcs12_test->vm_instruction_error;
++		d_vmcs12->vm_exit_intr_info = vmcs12_test->vm_exit_intr_info;
++		d_vmcs12->vm_exit_intr_error_code = vmcs12_test->vm_exit_intr_error_code;
++		d_vmcs12->idt_vectoring_info_field = vmcs12_test->idt_vectoring_info_field;
++		d_vmcs12->idt_vectoring_error_code = vmcs12_test->idt_vectoring_error_code;
++		d_vmcs12->vm_exit_instruction_len = vmcs12_test->vm_exit_instruction_len;
++		d_vmcs12->vmx_instruction_info = vmcs12_test->vmx_instruction_info;
++		d_vmcs12->guest_es_limit = vmcs12_test->guest_es_limit;
++		d_vmcs12->guest_cs_limit = vmcs12_test->guest_cs_limit;
++		d_vmcs12->guest_ss_limit = vmcs12_test->guest_ss_limit;
++		d_vmcs12->guest_ds_limit = vmcs12_test->guest_ds_limit;
++		d_vmcs12->guest_fs_limit = vmcs12_test->guest_fs_limit;
++		d_vmcs12->guest_gs_limit = vmcs12_test->guest_gs_limit;
++		d_vmcs12->guest_ldtr_limit = vmcs12_test->guest_ldtr_limit;
++		d_vmcs12->guest_tr_limit = vmcs12_test->guest_tr_limit;
++		d_vmcs12->guest_gdtr_limit = vmcs12_test->guest_gdtr_limit;
++		d_vmcs12->guest_idtr_limit = vmcs12_test->guest_idtr_limit;
++		d_vmcs12->guest_es_ar_bytes = vmcs12_test->guest_es_ar_bytes;
++		d_vmcs12->guest_cs_ar_bytes = vmcs12_test->guest_cs_ar_bytes;
++		d_vmcs12->guest_ss_ar_bytes = vmcs12_test->guest_ss_ar_bytes;
++		d_vmcs12->guest_ds_ar_bytes = vmcs12_test->guest_ds_ar_bytes;
++		d_vmcs12->guest_fs_ar_bytes = vmcs12_test->guest_fs_ar_bytes;
++		d_vmcs12->guest_gs_ar_bytes = vmcs12_test->guest_gs_ar_bytes;
++		d_vmcs12->guest_ldtr_ar_bytes = vmcs12_test->guest_ldtr_ar_bytes;
++		d_vmcs12->guest_tr_ar_bytes = vmcs12_test->guest_tr_ar_bytes;
++		d_vmcs12->guest_interruptibility_info = vmcs12_test->guest_interruptibility_info;
++		d_vmcs12->guest_activity_state = vmcs12_test->guest_activity_state;
++		d_vmcs12->guest_sysenter_cs = vmcs12_test->guest_sysenter_cs;
++		d_vmcs12->host_ia32_sysenter_cs = vmcs12_test->host_ia32_sysenter_cs;
++		d_vmcs12->vmx_preemption_timer_value = vmcs12_test->vmx_preemption_timer_value;
++		d_vmcs12->virtual_processor_id = vmcs12_test->virtual_processor_id;
++		d_vmcs12->posted_intr_nv = vmcs12_test->posted_intr_nv;
++		d_vmcs12->guest_es_selector = vmcs12_test->guest_es_selector;
++		d_vmcs12->guest_cs_selector = vmcs12_test->guest_cs_selector;
++		d_vmcs12->guest_ss_selector = vmcs12_test->guest_ss_selector;
++		d_vmcs12->guest_ds_selector = vmcs12_test->guest_ds_selector;
++		d_vmcs12->guest_fs_selector = vmcs12_test->guest_fs_selector;
++		d_vmcs12->guest_gs_selector = vmcs12_test->guest_gs_selector;
++		d_vmcs12->guest_ldtr_selector = vmcs12_test->guest_ldtr_selector;
++		d_vmcs12->guest_tr_selector = vmcs12_test->guest_tr_selector;
++		d_vmcs12->guest_intr_status = vmcs12_test->guest_intr_status;
++		d_vmcs12->host_es_selector = vmcs12_test->host_es_selector;
++		d_vmcs12->host_cs_selector = vmcs12_test->host_cs_selector;
++		d_vmcs12->host_ss_selector = vmcs12_test->host_ss_selector;
++		d_vmcs12->host_ds_selector = vmcs12_test->host_ds_selector;
++		d_vmcs12->host_fs_selector = vmcs12_test->host_fs_selector;
++		d_vmcs12->host_gs_selector = vmcs12_test->host_gs_selector;
++		d_vmcs12->host_tr_selector = vmcs12_test->host_tr_selector;
++		d_vmcs12->guest_pml_index = vmcs12_test->guest_pml_index;
++		
++		dump_vmcs_disp = 0; 
++
++		return 1; 
++	}
++	EXPORT_SYMBOL(nested_vmx_dump_vmcs12);
++#endif
++
+ /*
+  * nested_vmx_run() handles a nested entry, i.e., a VMLAUNCH or VMRESUME on L1
+  * for running an L2 nested guest.
+@@ -3558,6 +3795,10 @@
+ 
+ 	vmcs12 = get_vmcs12(vcpu);
+ 
++#ifdef _COSMOS_UT_
++	current_vcpu = vcpu;
++#endif
++
+ 	/*
+ 	 * Can't VMLAUNCH or VMRESUME a shadow VMCS. Despite the fact
+ 	 * that there *is* a valid VMCS pointer, RFLAGS.CF is set
+@@ -3575,6 +3816,85 @@
+ 		copy_shadow_to_vmcs12(vmx);
+ 	}
+ 
++#ifdef _COSMOS_REC_	
++	/* RECORDING */
++	/*
++	* We only want to record if and only if: 
++	* 1) !launch == we're handling a VMRESUME
++	* 2) Tracing is enabled 
++	* 3) The number of exit recorded is less than buffer_size
++	* 4) We arrived to # exit chosen from user
++	* 5) We're handling an L2 exit from L1 (is_L1). This should be always true, 
++	* 	  I mean that L0 execute hardware VMRESUME and does not need the handle. 
++	* NB: handle_vmresume, handle_vmwrite and handle_vmread handle both L1 and L2 exits when nested == 1! We would like to handle
++	* operations on vmcs12 (i.e. handle_vmwrite and handle_vmread performed by L1).
++	*/
++	if (!launch && enable_tracing == 1 && exit_counter < buffer_size && 
++		this_exit_rec >= from_vmexit) {
++		
++		// If we're coming from an exit reflected to L1 AND we waited enough time
++		if (is_L1 == 1) {
++			unsigned long regs_out [15] = {0}; 
++
++			regs_out[0] = kvm_rax_read(vcpu);
++			regs_out[1] = kvm_rbx_read(vcpu);
++			regs_out[2] = kvm_rcx_read(vcpu);
++			regs_out[3] = kvm_rdx_read(vcpu);
++			regs_out[4] = kvm_r8_read(vcpu);
++			regs_out[5] = kvm_r9_read(vcpu);
++			regs_out[6] = kvm_r10_read(vcpu);
++			regs_out[7] = kvm_r11_read(vcpu);
++			regs_out[8] = kvm_r12_read(vcpu);
++			regs_out[9] = kvm_r13_read(vcpu);
++			regs_out[10] = kvm_r14_read(vcpu);
++			regs_out[11] = kvm_r15_read(vcpu);
++			regs_out[12] = kvm_rbp_read(vcpu);
++			regs_out[13] = kvm_rdi_read(vcpu);
++			regs_out[14] = kvm_rsi_read(vcpu); 
++			write_regs_out(buffer, exit_counter, regs_out, buffer_size); 
++
++			// print_buffer_i (buffer, exit_counter);
++
++			if (!control_execution)
++				//printk ("%lu, L1: %hhu.\n", exit_counter, is_L1);
++
++			is_L1 = 0;
++
++			exit_counter++;
++
++			if (exit_counter == buffer_size) printk ("[COSMOS] Recording ended.\n");
++
++			// Modifica di _RnR_FJ_
++			if (enable_dump_vmcs12_rec) {
++				dump_vmcs_disp = 1; 
++				down(&SEM_DUMP_WAIT_rec);
++			}
++
++			/* Performance evaluation */
++			if (efficiency_rec) { 
++				rec_end = ktime_get();
++				
++				if (exit_counter == 1) {
++					rec_cum_time[0] = ktime_set(0, 0); 
++					rec_init = ktime_get();
++					rec_cum_time[exit_counter] = ktime_sub (rec_init, ktime_add(rec_cum_time[exit_counter-1], ktime_sub(rec_end, rec_start)));
++				}
++				else if (exit_counter > 1)
++					rec_cum_time[exit_counter] = ktime_add(rec_cum_time[exit_counter-1], ktime_sub(rec_end, rec_start));
++				
++				rec_start = ktime_get();
++			}
++		}
++	}
++	/* We want to update the next exit only if it is a VMRESUME and only if we started recording.*/
++	else if (!launch && enable_tracing == 1 && this_exit_rec < from_vmexit) {
++		/* buffer to record exit_reason befone from_vmexit*/
++		/* if (enable_replaying == 0)
++			exit_before[vmcs12->vm_exit_reason].count++; */
++		this_exit_rec++; 
++	}
++#endif
++
+ 	/*
+ 	 * The nested entry process starts with enforcing various prerequisites
+ 	 * on vmcs12 as required by the Intel SDM, and act appropriately when
+@@ -4562,6 +4882,45 @@
+ 	/* trying to cancel vmlaunch/vmresume is a bug */
+ 	WARN_ON_ONCE(vmx->nested.nested_run_pending);
+ 
++	#ifdef _COSMOS_UT_
++		current_vcpu = vcpu; 
++	#endif
++
++	#ifdef _COSMOS_REC_
++		/* Recording: if we arrived here, L0 reflected to L1 that must handle an exit from L2  */
++		/* We want to record start exits if and only if: 
++		* 1) Exit # is less than buffer size.
++		* 2) Tracing is enabled.
++		* 3) We arrived to exit chosen by user.
++		* 4) We are handling an L2 exit (should be always true here tho...).
++		*/
++		if (exit_counter < buffer_size && enable_tracing == 1 && this_exit_rec == from_vmexit) {
++
++			unsigned long regs_in [15] = {0}; 
++
++			regs_in[0] = kvm_rax_read(vcpu);
++			regs_in[1] = kvm_rbx_read(vcpu);
++			regs_in[2] = kvm_rcx_read(vcpu);
++			regs_in[3] = kvm_rdx_read(vcpu);
++			regs_in[4] = kvm_r8_read(vcpu);
++			regs_in[5] = kvm_r9_read(vcpu);
++			regs_in[6] = kvm_r10_read(vcpu);
++			regs_in[7] = kvm_r11_read(vcpu);
++			regs_in[8] = kvm_r12_read(vcpu);
++			regs_in[9] = kvm_r13_read(vcpu);
++			regs_in[10] = kvm_r14_read(vcpu);
++			regs_in[11] = kvm_r15_read(vcpu);
++			regs_in[12] = kvm_rbp_read(vcpu);
++			regs_in[13] = kvm_rdi_read(vcpu);
++			regs_in[14] = kvm_rsi_read(vcpu); 
++
++			write_regs_in(buffer, exit_counter, regs_in, true, buffer_size); 
++
++			/* This flag is useful in the resume */
++			is_L1 = 1; 
++		}
++	#endif
++
+ 	if (kvm_check_request(KVM_REQ_GET_NESTED_STATE_PAGES, vcpu)) {
+ 		/*
+ 		 * KVM_REQ_GET_NESTED_STATE_PAGES is also used to map
+@@ -4710,6 +5069,37 @@
+ 						       vmcs12->vm_exit_intr_error_code,
+ 						       KVM_ISA_VMX);
+ 
++	#ifdef _COSMOS_FJ_
++        if (control_execution) {
++            
++            // We updated VMCS12, we're trying to resume L1...
++            if (enable_dump_vmcs12_fi) {
++                int timeout_secs = 1; // Maximum timeout in seconds
++                long timeout_jiffies = timeout_secs * HZ; // Convert seconds to jiffies
++                dump_vmcs_disp = 1; 
++
++                if (down_timeout(&SEM_DUMP_WAIT_fi, timeout_jiffies) != 0) goto exit_RnR_FJ;
++
++                if (vmexit_to_inject != NULL) {
++                    short offset;
++                    size_t i = 0; 
++                    short my_offset; 
++                    unsigned long long my_value; 
++
++                    my_offset = get_vmcs12_field_offset(VM_EXIT_REASON);
++                    my_value = vmcs12_read_any(vmcs12, VM_EXIT_REASON, my_offset);
++
++                    for (i = 0; i < vmexit_to_inject->op_counter; i++) {
++                        offset = get_vmcs12_field_offset(vmexit_to_inject->ops[i].field);
++                        vmcs12_write_any(vmcs12, vmexit_to_inject->ops[i].field, offset, vmexit_to_inject->ops[i].value);
++                        printk("[COSMOS-Fi] Exit Field [%lx] -> Value [%llx]. Reason: [%llx].\n", vmexit_to_inject->ops[i].field, vmexit_to_inject->ops[i].value, my_value);
++                    }
++                } 
++            }
++        }
++        exit_RnR_FJ:
++    #endif
++
+ 		load_vmcs12_host_state(vcpu, vmcs12);
+ 
+ 		return;
+@@ -5265,6 +5655,14 @@
+ 			return kvm_handle_memory_failure(vcpu, r, &e);
+ 	}
+ 
++#ifdef _COSMOS_REC_
++	/* RECORDING */
++	/* We want to record if and only if... See nested_vmx_vmexit */ 
++	if (enable_tracing == 1 && exit_counter < buffer_size && this_exit_rec == from_vmexit) {
++		write_op (buffer, exit_counter, field, value, 0, buffer_size); 
++	}
++#endif
++
+ 	return nested_vmx_succeed(vcpu);
+ }
+ 
+@@ -5396,6 +5794,14 @@
+ 		vmx->nested.dirty_vmcs12 = true;
+ 	}
+ 
++#ifdef _COSMOS_REC_
++	/* RECORDING */
++	/* We want to record if and only if... See nested_vmx_vmexit */
++	if (enable_tracing == 1 && exit_counter < buffer_size && this_exit_rec == from_vmexit) {
++		write_op (buffer, exit_counter, field, value, 1, buffer_size); 
++	}
++#endif
++
+ 	return nested_vmx_succeed(vcpu);
+ }
+ 

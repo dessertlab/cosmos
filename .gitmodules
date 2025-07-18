@@ -1,0 +1,10 @@
+[submodule "cosmos-fi"]
+	path = cosmos-fi
+	url = https://dessert.unina.it:8088/ldesi/cosmos-fi
+	branch = main
+[submodule "cosmos-rec"]
+	path = cosmos-rec
+	url = https://dessert.unina.it:8088/ldesi/cosmos-rec
+[submodule "cosmos-userspace"]
+	path = cosmos-userspace
+	url = https://dessert.unina.it:8088/ldesi/cosmos-userspace
