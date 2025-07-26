@@ -1,16 +1,10 @@
 # COSMOS installation guide 
 
 This directory includes the installation guide for all the components of COSMOS and how to apply the patch.
-If you want to clone cosmos repository, run the following (if the first cloning) and use you're Gitlab credentials when requested:
 
 ```
-$ git clone --recurse-submodules https://dessert.unina.it:8088/ldesi/cosmos.git
-$ git add . && git commit -m "updates" && git push
+$ git clone https://github.com/dessertlab/Cosmos
 ```
-
-If you have already cloned cosmos repo be sure to pull every commits in submodules and push (if any) modification:
-
-``git submodule foreach git pull origin master``
 
 ## 1. System requirement and kernel installation
 
