@@ -1,4 +1,4 @@
-# COSMOS installation guide 
+# COSMOS Installation Guide 
 
 This directory includes the installation guide for all the components of COSMOS and how to apply the patch.
 
@@ -6,16 +6,16 @@ This directory includes the installation guide for all the components of COSMOS 
 $ git clone https://github.com/dessertlab/Cosmos
 ```
 
-## 1. System requirement and kernel installation
+## 1. System Requirements and Kernel Installation
 
 * Intel CPU with VT-x enabled.
 * minimum 100GB HDD / SSD. 
 
-Information provided has been tested on Ubuntu 22.04.03 LTS, Linux kernel version 5.19.0. 
+The information provided has been tested on Ubuntu 22.04.03 LTS, with a Linux kernel version of 5.19.0. 
 
-### Build dependencies
+### Build Dependencies
 
-Go to /etc/apt/sources.list and decomment all src lines:
+Go to /etc/apt/sources.list and uncomment all src lines:
 
 ```
 sudo nano /etc/apt/sources.list
@@ -24,7 +24,7 @@ sudo nano /etc/apt/sources.list
 Then update: 
 
 ```
-sudo apt udpate
+sudo apt update
 ```
 
 Install the dependencies and the userspace utilities (Note: on Linux Kernel version 5.19.0, package of Ubuntu 22.04.03 LTS): 
@@ -42,7 +42,7 @@ git clone https://github.com/dessertlab/Cosmos.git
 
 ### Kernel compiling and installation
 
-Extract, compile and install the new kernel:
+Extract, compile, and install the new kernel:
 
 ```
 sudo cd /usr/src/linux-source-5.19.0; 
@@ -51,7 +51,7 @@ sudo cd linux-source-5.19.0;
 sudo make menuconfig; 
 ```
 
-Here just save and exit.
+Here, just save and exit.
 
 ```
 sudo nano .config
@@ -146,22 +146,22 @@ If you want to clean up everything, remove the related files and directories und
 
 ### Troubleshooting
 
-Here we will list all the problems we faced into compiling the linux source kernel and you could run into too. 
+Here we will list all the problems we faced in compiling the Linux source kernel, and you could run into them too. 
 
 #### Make modules_install or make install errors
 
-This problem could be related to some errors during the "sudo make" phase. We advice you to run the make command without the flag -j to understand if and where the errors are. 
+This problem could be related to some errors during the "sudo make" phase. We advise you to run the make command without the flag -j to understand if and where the errors are. 
 
-A common issue regarding this problem is the missing or the wrong path of the certificated needed to compile the kernel. Go to: 
+A common issue regarding this problem is the missing or the wrong path of the certificate needed to compile the kernel. Go to: 
 
 ```
 sudo cd /usr/src/linux-source-5.19.0/linux-source-5.19.0;
 nano .config
 ```
 
-Locate the line "CONFIG_SYSTEM_TRUSTED_KEYS" (CTRL + W if you are using nano). Change the line according to the path of the certs of your kernel version (e.g. CONFIG_SYSTEM_TRUSTED_KEYS="../debian/canonical-certs.pem"), do the same for the line CONFIG_SYSTEM_REVOCATION_KEYS (e.g. CONFIG_SYSTEM_REVOCATION_KEYS="../debian/canonical-revoked-certs.pem"). 
+Locate the line "CONFIG_SYSTEM_TRUSTED_KEYS" (CTRL + W if you are using nano). Change the line according to the path of the certs of your kernel version (e.g., CONFIG_SYSTEM_TRUSTED_KEYS="../debian/canonical-certs.pem"), do the same for the line CONFIG_SYSTEM_REVOCATION_KEYS (e.g., CONFIG_SYSTEM_REVOCATION_KEYS="../debian/canonical-revoked-certs.pem"). 
 
-If you do not have the certs folder, **do not remove the lines** but just modify them with empty strings (e.g. CONFIG_SYSTEM_TRUSTED_KEYS="" and CONFIG_SYSTEM_REVOCATION_KEYS="").
+If you do not have the certs folder, **do not remove the lines** but just modify them with empty strings (e.g., CONFIG_SYSTEM_TRUSTED_KEYS="" and CONFIG_SYSTEM_REVOCATION_KEYS="").
 
 After that, rerun: 
 
@@ -171,7 +171,7 @@ sudo make modules_install;
 sudo make install; 
 ```
 
-#### Errors during the compilation of the linux kernel modules
+#### Errors during the compilation of the Linux kernel modules
 
 There can be many reasons for this problem. Remember to: 
 
@@ -182,7 +182,16 @@ There can be many reasons for this problem. Remember to:
 
 If you use **COSMOS** in your research or project, please cite our paper (accepted at IEEE TDSC 2025):
 
-TO_ADD
+@ARTICLE{cinque2025cosmos,
+  author={Cinque, Marcello and Cotroneo, Domenico and Rosa, Giuseppe De and Simone, Luigi De and Farina, Giorgio},
+  journal={IEEE Transactions on Dependable and Secure Computing}, 
+  title={{COSMOS: A Fault Injection Framework to Assess Hardware-Assisted Hypervisors}}, 
+  year={2025},
+  volume={},
+  number={},
+  pages={1-14},
+  doi={10.1109/TDSC.2025.3597103}
+}
 
 ## License
 
