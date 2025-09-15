@@ -184,7 +184,7 @@ If you use **COSMOS** in your research or project, please cite our paper (accept
 
 ```
 @ARTICLE{cinque2025cosmos,
-  author={Cinque, Marcello and Cotroneo, Domenico and Rosa, Giuseppe De and Simone, Luigi De and Farina, Giorgio},
+  author={Cinque, Marcello and Cotroneo, Domenico and De Rosa, Giuseppe and De Simone, Luigi and Farina, Giorgio},
   journal={IEEE Transactions on Dependable and Secure Computing}, 
   title={{COSMOS: A Fault Injection Framework to Assess Hardware-Assisted Hypervisors}}, 
   year={2025},
