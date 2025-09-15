@@ -182,6 +182,7 @@ There can be many reasons for this problem. Remember to:
 
 If you use **COSMOS** in your research or project, please cite our paper (accepted at IEEE TDSC 2025):
 
+```
 @ARTICLE{cinque2025cosmos,
   author={Cinque, Marcello and Cotroneo, Domenico and Rosa, Giuseppe De and Simone, Luigi De and Farina, Giorgio},
   journal={IEEE Transactions on Dependable and Secure Computing}, 
@@ -192,6 +193,7 @@ If you use **COSMOS** in your research or project, please cite our paper (accept
   pages={1-14},
   doi={10.1109/TDSC.2025.3597103}
 }
+```
 
 ## License
 
